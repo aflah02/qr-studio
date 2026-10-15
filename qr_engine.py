@@ -7,6 +7,7 @@ import math
 import re
 import warnings
 from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -35,6 +36,10 @@ class QRResult:
     svg: str
     preview: bytes
     pixels: int
+    width: int
+    height: int
+    module_style: str
+    canvas_shape: str
     dpi: int
     requested_logo_percent: int
     used_logo_percent: int
@@ -173,14 +178,37 @@ def _placement(matrix: list[list[bool]], logo: Image.Image | None, percent: int,
     return ((side-width)/2, (side-height)/2, width, height, gap)
 
 
-def _render(matrix: list[list[bool]], logo: Image.Image | None, placement, pixels: int, monochrome: bool = False) -> Image.Image:
+@lru_cache(maxsize=40)
+def _protected_modules(side: int) -> frozenset[tuple[int, int]]:
+    """Keep finder, timing and alignment patterns square in every module style."""
+    body = side - 8
+    version = (body - 17) // 4
+    centers = qrcode.util.pattern_position(version)
+    protected = set()
+    for y in range(side):
+        for x in range(side):
+            if ((x < 13 and y < 13) or (x >= side-13 and y < 13)
+                or (x < 13 and y >= side-13) or x in {10,12} or y in {10,12}
+                or any(abs(x-4-cx) <= 2 and abs(y-4-cy) <= 2 for cx in centers for cy in centers)):
+                protected.add((x,y))
+    return frozenset(protected)
+
+
+def _render(matrix: list[list[bool]], logo: Image.Image | None, placement, pixels: int, monochrome: bool = False, module_style: str = "square") -> Image.Image:
     image = Image.new("RGB", (pixels, pixels), "white")
     draw = ImageDraw.Draw(image)
     unit = pixels / len(matrix)
+    protected = _protected_modules(len(matrix)) if module_style != "square" else frozenset()
     for y, row in enumerate(matrix):
         for x, dark in enumerate(row):
             if dark:
-                draw.rectangle((round(x*unit), round(y*unit), round((x+1)*unit)-1, round((y+1)*unit)-1), fill="black")
+                bounds = (round(x*unit), round(y*unit), round((x+1)*unit)-1, round((y+1)*unit)-1)
+                if module_style == "square" or (x,y) in protected:
+                    draw.rectangle(bounds, fill="black")
+                elif module_style == "rounded":
+                    draw.rounded_rectangle(bounds, radius=.3*unit, fill="black")
+                else:
+                    draw.ellipse(bounds, fill="black")
     if logo is not None and placement is not None:
         x, y, width, height, gap = placement
         draw.rounded_rectangle(
@@ -195,15 +223,20 @@ def _render(matrix: list[list[bool]], logo: Image.Image | None, placement, pixel
 
 def _scan(image: Image.Image, url: str) -> bool:
     try:
+        if image.mode == "RGBA":
+            background = Image.new("RGBA", image.size, "white")
+            background.alpha_composite(image)
+            image = background.convert("RGB")
         code = zxingcpp.read_barcode(image)
         return code is not None and code.text == url
     except (ValueError, RuntimeError):
         return False
 
 
-def _checks(image: Image.Image, url: str, modules: int) -> tuple[ScanCheck, ...]:
-    small = max(320, modules*5)
-    large = max(640, modules*8)
+def _checks(image: Image.Image, url: str, modules: int, qr_pixels: float | None = None) -> tuple[ScanCheck, ...]:
+    factor = max(image.size) / qr_pixels if qr_pixels else 1
+    small = max(320, modules*5) * factor
+    large = max(640, modules*8) * factor
     samples = [
         ("Smaller image", small, False),
         ("Larger image", large, False),
@@ -211,16 +244,30 @@ def _checks(image: Image.Image, url: str, modules: int) -> tuple[ScanCheck, ...]
     ]
     checks = []
     for label, pixels, blur in samples:
-        sample = image.resize((pixels, pixels), Image.Resampling.LANCZOS)
+        width = max(1, round(image.width * pixels / max(image.size)))
+        height = max(1, round(image.height * pixels / max(image.size)))
+        sample = image.resize((width, height), Image.Resampling.LANCZOS)
         if blur:
             sample = sample.filter(ImageFilter.GaussianBlur(.5))
-        checks.append(ScanCheck(label, pixels, _scan(sample, url)))
+        checks.append(ScanCheck(label, max(width,height), _scan(sample, url)))
     return tuple(checks)
 
 
-def _svg(matrix: list[list[bool]], url: str, logo: Image.Image | None, placement) -> str:
+def _svg(matrix: list[list[bool]], url: str, logo: Image.Image | None, placement, module_style: str = "square") -> str:
     side = len(matrix)
-    path = "".join(f"M{x},{y}h1v1h-1z" for y,row in enumerate(matrix) for x,dark in enumerate(row) if dark)
+    protected = _protected_modules(side) if module_style != "square" else frozenset()
+    paths, styled = [], []
+    for y,row in enumerate(matrix):
+        for x,dark in enumerate(row):
+            if not dark:
+                continue
+            if module_style == "square" or (x,y) in protected:
+                paths.append(f"M{x},{y}h1v1h-1z")
+            elif module_style == "rounded":
+                styled.append(f'<rect x="{x}" y="{y}" width="1" height="1" rx="0.3"/>')
+            else:
+                styled.append(f'<circle cx="{x+.5}" cy="{y+.5}" r="0.5"/>')
+    path = "".join(paths)
     artwork = ""
     if logo is not None and placement is not None:
         x,y,width,height,gap = placement
@@ -233,8 +280,59 @@ def _svg(matrix: list[list[bool]], url: str, logo: Image.Image | None, placement
     return (
         f'<svg xmlns="{SVG_NS}" width="1024" height="1024" viewBox="0 0 {side} {side}" role="img">'
         f'<title>QR code for {escape(url)}</title><rect width="{side}" height="{side}" fill="white"/>'
-        f'<path d="{path}" fill="black"/>{artwork}</svg>'
+        f'<g fill="black"><path d="{path}"/>{"".join(styled)}</g>{artwork}</svg>'
     )
+
+
+def _canvas_geometry(width: int, height: int, shape: str) -> tuple[int,int,int]:
+    if shape == "triangle":
+        side = max(1,int(.9*width*height/(width+height)))
+        return (width-side)//2, int(height-side-.04*min(width,height)), side
+    if shape == "circle":
+        size = .96 / math.sqrt(1/width**2 + 1/height**2)
+    elif shape == "hexagon":
+        size = .96 * min(width,height,2*width*height/(2*height+width))
+    elif shape == "rounded":
+        size = .88 * min(width,height)
+    else:
+        size = min(width,height)
+    side = max(1,int(size))
+    return (width-side)//2, (height-side)//2, side
+
+
+def _canvas_image(qr_image: Image.Image, width: int, height: int, shape: str, box) -> Image.Image:
+    if shape == "square":
+        canvas = Image.new("RGB", (width,height), "white")
+    else:
+        canvas = Image.new("RGBA", (width,height), (255,255,255,0))
+        draw = ImageDraw.Draw(canvas)
+        if shape == "triangle":
+            draw.polygon([(width*.5,0),(width-1,height-1),(0,height-1)],fill="white")
+        elif shape == "circle":
+            draw.ellipse((0,0,width-1,height-1), fill="white")
+        elif shape == "rounded":
+            draw.rounded_rectangle((0,0,width-1,height-1),radius=.12*min(width,height),fill="white")
+        else:
+            draw.polygon([(width*.25,0),(width*.75,0),(width-1,height*.5),(width*.75,height-1),(width*.25,height-1),(0,height*.5)],fill="white")
+    canvas.paste(qr_image,(box[0],box[1]))
+    return canvas
+
+
+def _canvas_svg(svg: str, width: int, height: int, shape: str, box, modules: int) -> str:
+    x,y,side = box
+    inner = svg.split(">",1)[1].rsplit("</svg>",1)[0]
+    if shape == "triangle":
+        background = f'<polygon points="{width/2},0 {width},{height} 0,{height}" fill="white"/>'
+    elif shape == "circle":
+        background = f'<ellipse cx="{width/2}" cy="{height/2}" rx="{width/2}" ry="{height/2}" fill="white"/>'
+    elif shape == "hexagon":
+        points = f'{width*.25},0 {width*.75},0 {width},{height*.5} {width*.75},{height} {width*.25},{height} 0,{height*.5}'
+        background = f'<polygon points="{points}" fill="white"/>'
+    else:
+        radius = .12*min(width,height) if shape == "rounded" else 0
+        background = f'<rect width="{width}" height="{height}" rx="{radius}" fill="white"/>'
+    return (f'<svg xmlns="{SVG_NS}" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img">'
+            f'{background}<svg x="{x}" y="{y}" width="{side}" height="{side}" viewBox="0 0 {modules} {modules}">{inner}</svg></svg>')
 
 
 def generate_qr(
@@ -247,14 +345,24 @@ def generate_qr(
     auto_reduce: bool = True,
     monochrome: bool = False,
     bw_threshold: int = 170,
+    width: int | None = None,
+    height: int | None = None,
+    module_style: str = "square",
+    canvas_shape: str = "square",
 ) -> QRResult:
     url = normalize_url(url)
+    width = width if width is not None else pixels
+    height = height if height is not None else width
     if not 8 <= logo_percent <= 28:
         raise ValueError("Choose a logo size between 8% and 28%.")
     if not 0 <= padding_percent <= 30:
         raise ValueError("Choose logo padding between 0% and 30%.")
-    if not 512 <= pixels <= 6000 or not 72 <= dpi <= 1200:
-        raise ValueError("Choose an image size from 512 to 6000 px and a DPI from 72 to 1200.")
+    if not 512 <= width <= 8000 or not 512 <= height <= 8000 or width*height > 36_000_000:
+        raise ValueError("Choose dimensions from 512 to 8000 px, with at most 36 million pixels in total.")
+    if not 72 <= dpi <= 1200:
+        raise ValueError("Choose a print resolution from 72 to 1200 dpi.")
+    if module_style not in {"square","rounded","dots"} or canvas_shape not in {"square","rounded","circle","hexagon","triangle"}:
+        raise ValueError("Choose a supported QR style and canvas shape.")
     if not 1 <= bw_threshold <= 254:
         raise ValueError("Choose a black-and-white threshold between 1 and 254.")
     if len(url.encode("utf-8")) > 1273:
@@ -277,19 +385,24 @@ def generate_qr(
         percentages += list(range(logo_percent-2, 5, -2))
     for used in percentages:
         placement = _placement(matrix, logo, used, padding_percent)
-        sample = _render(matrix, logo, placement, max(1024, len(matrix)*10), monochrome)
+        sample = _render(matrix, logo, placement, max(1024, len(matrix)*10), monochrome, module_style)
         checks = _checks(sample, url, len(matrix))
         if all(c.passed for c in checks):
             break
-    image = _render(matrix, logo, placement, pixels, monochrome)
+    box = _canvas_geometry(width,height,canvas_shape)
+    qr_image = _render(matrix, logo, placement, box[2], monochrome, module_style)
+    image = _canvas_image(qr_image,width,height,canvas_shape,box)
     # Verify downscaled samples of the actual downloadable PNG as well.
-    checks = _checks(image, url, len(matrix))
+    checks = _checks(image, url, len(matrix), box[2])
     png = io.BytesIO(); image.save(png, format="PNG", dpi=(dpi,dpi))
     preview = io.BytesIO()
-    image.resize((min(900,pixels), min(900,pixels)), Image.Resampling.NEAREST).save(preview, format="PNG")
+    image.thumbnail((900,900),Image.Resampling.NEAREST)
+    image.save(preview,format="PNG")
+    svg = _canvas_svg(_svg(matrix,url,logo,placement,module_style),width,height,canvas_shape,box,len(matrix))
     return QRResult(
-        url=url, png=png.getvalue(), svg=_svg(matrix,url,logo,placement), preview=preview.getvalue(),
-        pixels=pixels, dpi=dpi, requested_logo_percent=logo_percent,
+        url=url, png=png.getvalue(), svg=svg, preview=preview.getvalue(),
+        pixels=max(width,height), width=width, height=height, module_style=module_style, canvas_shape=canvas_shape,
+        dpi=dpi, requested_logo_percent=logo_percent,
         used_logo_percent=used if logo is not None else 0, has_logo=logo is not None,
         monochrome=monochrome and logo is not None, checks=checks,
     )

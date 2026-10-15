@@ -9,11 +9,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from qr_engine import MAX_LOGO_BYTES, generate_qr
+from qr_exports import FORMATS, export_bundle, export_file
 
 
 def _generate_payload(**options) -> dict:
@@ -31,6 +32,9 @@ def _generate_payload(**options) -> dict:
         "svg": result.svg,
         "zip_base64": base64.b64encode(bundle.getvalue()).decode("ascii"),
         "pixels": result.pixels, "dpi": result.dpi, "has_logo": result.has_logo,
+        "width": result.width, "height": result.height,
+        "module_style": result.module_style, "canvas_shape": result.canvas_shape,
+        "formats": [{"value":key,"label":value[0]} for key,value in FORMATS.items()],
         "monochrome": result.monochrome,
         "verified": result.verified, "logo_reduced": result.logo_reduced,
         "requested_logo_percent": result.requested_logo_percent,
@@ -39,8 +43,20 @@ def _generate_payload(**options) -> dict:
     }
 
 
+def _export_payload(options: dict, kind: str):
+    kind = {"jpeg":"jpg","tif":"tiff"}.get(kind.lower(),kind.lower())
+    if kind not in FORMATS and kind != "zip":
+        raise ValueError("Choose a supported export format.")
+    result = generate_qr(**options)
+    host = urlsplit(result.url).hostname or "code"
+    stem = "qr_" + (re.sub(r"[^A-Za-z0-9_-]", "_", host)[:70] or "code")
+    if kind == "zip":
+        return export_bundle(result,stem), "application/zip", stem+".zip"
+    return export_file(result,kind), FORMATS[kind][1], stem+"."+kind
+
+
 def create_app() -> FastAPI:
-    api = FastAPI(title="QR Studio", version="1.0.0", redoc_url=None)
+    api = FastAPI(title="QR Studio", version="1.1.0", redoc_url=None)
     static = Path(os.environ.get("QR_STATIC_DIR", Path(__file__).parent / "static"))
 
     @api.middleware("http")
@@ -65,18 +81,21 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
-    @api.post("/api/generate")
-    async def generate(
+    async def read_options(
         url: Annotated[str, Form(max_length=3000)],
         logo: Annotated[UploadFile | None, File()] = None,
         logo_percent: Annotated[int, Form(ge=8, le=28)] = 18,
         padding_percent: Annotated[int, Form(ge=0, le=30)] = 12,
-        pixels: Annotated[int, Form(ge=512, le=6000)] = 4096,
+        pixels: Annotated[int, Form(ge=512, le=8000)] = 4096,
         dpi: Annotated[int, Form(ge=72, le=1200)] = 600,
         auto_reduce: Annotated[bool, Form()] = True,
         logo_mode: Annotated[Literal["with_logo", "none"], Form()] = "with_logo",
         monochrome: Annotated[bool, Form()] = False,
         bw_threshold: Annotated[int, Form(ge=1, le=254)] = 170,
+        width: Annotated[int | None, Form(ge=512, le=8000)] = None,
+        height: Annotated[int | None, Form(ge=512, le=8000)] = None,
+        module_style: Annotated[Literal["square","rounded","dots"], Form()] = "square",
+        canvas_shape: Annotated[Literal["square","rounded","circle","hexagon","triangle"], Form()] = "square",
     ):
         logo_bytes = None
         if logo is not None:
@@ -87,13 +106,23 @@ def create_app() -> FastAPI:
                         raise HTTPException(status_code=413, detail="Choose a logo smaller than 5 MB.")
             finally:
                 await logo.close()
+        return dict(url=url, logo_bytes=logo_bytes, logo_percent=logo_percent,
+                    padding_percent=padding_percent, pixels=pixels, dpi=dpi,
+                    auto_reduce=auto_reduce, monochrome=monochrome, bw_threshold=bw_threshold,
+                    width=width, height=height, module_style=module_style, canvas_shape=canvas_shape)
+
+    @api.post("/api/generate")
+    async def generate(options: dict = Depends(read_options)):
         try:
-            return await run_in_threadpool(
-                _generate_payload, url=url, logo_bytes=logo_bytes,
-                logo_percent=logo_percent, padding_percent=padding_percent,
-                pixels=pixels, dpi=dpi, auto_reduce=auto_reduce,
-                monochrome=monochrome, bw_threshold=bw_threshold,
-            )
+            return await run_in_threadpool(_generate_payload, **options)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @api.post("/api/export")
+    async def export(format: str = Form("png"), options: dict = Depends(read_options)):
+        try:
+            content, mime, filename = await run_in_threadpool(_export_payload, options, format)
+            return Response(content,media_type=mime,headers={"Content-Disposition":f'attachment; filename="{filename}"'})
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

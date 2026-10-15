@@ -9,12 +9,12 @@ image = (
     .apt_install("libcairo2")
     .pip_install_from_requirements(str(ROOT / "requirements.txt"))
     .env({"QR_STATIC_DIR": "/app/static"})
-    .add_local_python_source("qr_engine", "web_app")
+    .add_local_python_source("qr_engine", "qr_exports", "web_app")
     .add_local_dir(str(ROOT / "static"), remote_path="/app/static")
 )
 
 
-@app.function(image=image, cpu=2, memory=1024, timeout=120, scaledown_window=300)
+@app.function(image=image, cpu=2, memory=2048, timeout=120, scaledown_window=300)
 @modal.concurrent(max_inputs=2)
 @modal.asgi_app()
 def web():

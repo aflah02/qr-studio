@@ -33,7 +33,7 @@ def test_downloads_decode_to_exact_url(url):
     assert zxingcpp.read_barcode(png).text==url
     root=ElementTree.fromstring(result.svg)
     assert root.tag.endswith("svg")
-    assert root.find("{http://www.w3.org/2000/svg}image") is not None
+    assert root.find(".//{http://www.w3.org/2000/svg}image") is not None
     if "&" in url:
         assert "&amp;" in result.svg
 
@@ -173,7 +173,7 @@ def test_monochrome_svg_embeds_binary_logo_and_still_scans():
     svg=b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#ffcc00"/><circle cx="50" cy="50" r="30" fill="#0066cc"/></svg>'
     result=generate_qr('https://example.com',svg,monochrome=True,pixels=1024)
     root=ElementTree.fromstring(result.svg)
-    embedded=root.find('{http://www.w3.org/2000/svg}image').get('href').split(',',1)[1]
+    embedded=root.find('.//{http://www.w3.org/2000/svg}image').get('href').split(',',1)[1]
     artwork=Image.open(io.BytesIO(base64.b64decode(embedded))).convert('RGB')
     assert {color for count,color in artwork.getcolors(2)}=={(0,0,0),(255,255,255)}
     output=Image.open(io.BytesIO(svg2png(bytestring=result.svg.encode(),output_width=1024,output_height=1024))).convert('RGB')

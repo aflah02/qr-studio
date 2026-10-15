@@ -1,6 +1,6 @@
 # QR Studio for Modal
 
-A web app that accepts a URL and an optional center logo, checks the complete QR code, and provides high-resolution PNG and SVG downloads. The interface uses FastAPI and a small HTML/CSS/JavaScript frontend. Modal serves the UI and API together.
+A web app that accepts a URL and an optional center logo, checks the complete QR code, and exports PNG, JPEG, WebP, SVG, PDF, TIFF, BMP and GIF. The interface uses FastAPI and a small HTML/CSS/JavaScript frontend. Modal serves the UI and API together.
 
 ## Deploy to Modal
 
@@ -24,7 +24,7 @@ For a temporary deployment that reloads code during development:
 modal serve app.py
 ```
 
-`app.py` defines the Modal image and endpoint. It includes `qr_engine.py`, `web_app.py` and the `static/` directory in the container automatically. Keep these files together.
+`app.py` defines the Modal image and endpoint. It includes `qr_engine.py`, `qr_exports.py`, `web_app.py` and the `static/` directory in the container automatically. Keep these files together.
 
 ## Use
 
@@ -36,7 +36,27 @@ Paste a URL and choose a **Logo style**:
 
 For the two logo styles, upload a PNG, JPEG, WebP or self-contained SVG up to 5 MB. Switching to **No logo** hides the upload controls and excludes the logo. Switching back restores the selected file.
 
-The preview updates after changes. Under **Customize output**, set the logo size and spacing, choose 1024, 2048, 4096 or 6000 pixels, and select 300 or 600 dpi metadata. Download the PNG, SVG or both in a ZIP.
+The preview updates after changes. **Customize output** offers:
+
+- **QR pattern style:** squares, rounded squares or dots. Finder, timing and alignment patterns remain square for scanning.
+- **Canvas shape:** square/rectangle, rounded rectangle, circle/oval, hexagon or triangle. The full QR code and its white margin fit inside the shape.
+- **Dimensions:** presets at 1024, 2048, 4096 or 6000 pixels, or custom width and height from 512 to 8000 pixels per edge, up to 36 megapixels in total. Rectangular canvases keep the QR pattern square and centered. Triangle canvases place the code lower so it fits inside the outline.
+- **Print resolution:** any integer from 72 to 1200 dpi. The preview reports the corresponding size in millimeters.
+
+Select an **Export format** and download the file, or download all eight formats as one ZIP. Larger formats are generated when requested, so they do not slow down the preview.
+
+| Export | Details |
+| --- | --- |
+| PNG | Lossless, with alpha transparency and DPI metadata |
+| JPEG (.jpg) | High quality, white background and DPI metadata |
+| WebP | Lossless, alpha transparency and resolution in EXIF metadata |
+| SVG | Vector QR modules with an embedded PNG logo |
+| PDF | Vector QR modules with an embedded logo and page size derived from pixels/DPI |
+| TIFF | Lossless LZW compression, transparency and DPI metadata |
+| BMP | Uncompressed RGB on white, with resolution metadata |
+| GIF | Static image with a 256-color palette on white |
+
+PNG, WebP, TIFF and SVG preserve transparent outer corners for shaped canvases. JPEG, BMP and GIF flatten those areas onto white. GIF does not carry standard print DPI metadata. All formats preserve the chosen pixel dimensions where applicable. SVG and PDF retain scalable QR geometry.
 
 The longest logo edge determines its size. Proportions and transparency are preserved, with white padding behind the artwork. Plain QR codes work when no logo is supplied. URLs without a scheme get `https://` automatically.
 
@@ -62,7 +82,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Tests cover QR destinations, upload formats, different logo proportions, explicit logo-free output, black-and-white conversion, URL validation, downloadable PNG/SVG/ZIP content, static assets, API error handling and the Modal entry point.
+Tests cover QR destinations, upload formats, different logo proportions, explicit logo-free output, black-and-white conversion, every QR style/canvas shape combination, all eight export types, custom dimensions and DPI, PDF page dimensions, ZIP contents, static assets, API error handling and the Modal entry point.
 
 ## API
 
@@ -77,8 +97,16 @@ Tests cover QR destinations, upload formats, different logo proportions, explici
 | `bw_threshold` | 170 | Black-and-white conversion threshold, 1–254 |
 | `logo_percent` | 18 | Longest logo edge, 8–28% of QR pattern width |
 | `padding_percent` | 12 | Padding relative to the logo size, 0–30% |
-| `pixels` | 4096 | PNG side length, 512–6000 |
-| `dpi` | 600 | PNG DPI metadata, 72–1200 |
+| `pixels` | 4096 | Default side length, 512–8000 |
+| `width` | Omitted | Custom width, 512–8000, overrides `pixels` |
+| `height` | Width | Custom height, 512–8000; total area must be at most 36 megapixels |
+| `dpi` | 600 | Print resolution, 72–1200 |
+| `module_style` | square | `square`, `rounded` or `dots` |
+| `canvas_shape` | square | `square`, `rounded`, `circle`, `hexagon` or `triangle` |
 | `auto_reduce` | true | Reduce the logo if needed for scan checks |
 
-The JSON response includes the normalized destination, verification checks, a preview, the PNG and ZIP as base64, and the SVG as text. Interactive API documentation is available at `/docs`; health status is at `/health`.
+The JSON response includes the normalized destination, actual width/height, verification checks, a preview, the PNG and a PNG+SVG ZIP as base64, and the SVG as text. These original fields remain available for API compatibility.
+
+`POST /api/export` accepts the same fields plus `format`: `png`, `jpg`, `webp`, `svg`, `pdf`, `tiff`, `bmp`, `gif`, or `zip`. `jpeg` and `tif` are accepted aliases. The response is the file itself, with an attachment filename. ZIP exports contain all eight formats.
+
+Interactive API documentation is available at `/docs`; health status is at `/health`.
