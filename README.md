@@ -1,22 +1,105 @@
-# QR Studio for Modal
+# QR Studio
 
-A web app that accepts a URL and an optional center logo, checks the complete QR code, and exports PNG, JPEG, WebP, SVG, PDF, TIFF, BMP and GIF. The interface uses FastAPI and a small HTML/CSS/JavaScript frontend. Modal serves the UI and API together.
+A web app that accepts a URL and an optional center logo, checks the complete QR code, and exports PNG, JPEG, WebP, SVG, PDF, TIFF, BMP and GIF. Built with FastAPI and a small HTML/CSS/JavaScript frontend. Run it locally or deploy it to Modal.
+
+## Setup
+
+Use Python 3.11 or newer (Python 3.12 is used by the Modal image). Clone the repository and create a virtual environment:
+
+```bash
+git clone https://github.com/aflah02/qr-studio.git
+cd qr-studio
+python -m venv .venv
+```
+
+On macOS or Linux, use `python3` if `python` is not available. Activate the environment using the command for your shell.
+
+**Windows Command Prompt:**
+
+```cmd
+.venv\Scripts\activate.bat
+```
+
+**Windows PowerShell:**
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+**macOS / Linux:**
+
+```bash
+source .venv/bin/activate
+```
+
+Run the commands below from the repository root with the environment activated.
+
+## Run locally
+
+Install the Python dependencies and start the development server:
+
+```bash
+python -m pip install -r requirements.txt
+python -m uvicorn web_app:create_app --factory --reload
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Press `Ctrl+C` to stop the server. Local use does not require a Modal account.
+
+### Cairo for logos and PDF export
+
+Built-in logos, uploaded SVG logos, PDF export and the all-formats ZIP need the Cairo system library in addition to the Python packages. Install it before using those features. Plain codes and PNG/JPEG/WebP uploads with raster exports work without it.
+
+**Debian / Ubuntu:**
+
+```bash
+sudo apt-get update
+sudo apt-get install libcairo2
+```
+
+**macOS (Homebrew):**
+
+```bash
+brew install cairo
+```
+
+**Windows (64-bit):**
+
+1. Install [MSYS2](https://www.msys2.org/) using its default location, `C:\msys64`.
+2. Open **MSYS2 UCRT64** from the Start menu and install [Cairo](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-cairo):
+
+   ```bash
+   pacman -S --needed mingw-w64-ucrt-x86_64-cairo
+   ```
+
+3. Return to your activated Python environment in **Windows Command Prompt** and set the DLL directory before starting the server:
+
+   ```cmd
+   set "CAIROCFFI_DLL_DIRECTORIES=C:\msys64\ucrt64\bin"
+   set "PATH=C:\msys64\ucrt64\bin;%PATH%"
+   python -m uvicorn web_app:create_app --factory --reload
+   ```
+
+   In **PowerShell**, use:
+
+   ```powershell
+   $env:CAIROCFFI_DLL_DIRECTORIES = "C:\msys64\ucrt64\bin"
+   $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+   python -m uvicorn web_app:create_app --factory --reload
+   ```
+
+These environment settings apply to the current terminal; repeat them in a new terminal. Adjust the paths if MSYS2 is installed elsewhere. See the [CairoSVG installation documentation](https://cairosvg.org/documentation/) for other platforms.
 
 ## Deploy to Modal
 
-Use Python 3.11 or newer. Clone the repository and deploy from its root:
+After the shared setup above, install the Modal CLI, authenticate and deploy:
 
 ```bash
-git clone https://github.com/aflah02/qr-code-maker.git
-cd qr-code-maker
-python -m venv .venv
-source .venv/bin/activate
-pip install 'modal>=1.0,<2'
+python -m pip install "modal>=1.0,<2"
 modal setup
 modal deploy app.py
 ```
 
-On Windows Command Prompt, activate with `.venv\Scripts\activate.bat` instead. In PowerShell, use `.venv\Scripts\Activate.ps1`. Skip `modal setup` if already authenticated. Modal builds the container, installs Cairo and the Python dependencies, and prints the deployed web URL. No application API keys or database are needed. The deployed endpoint is publicly accessible by default.
+Skip `modal setup` if already authenticated. Modal builds the container, installs Cairo and the Python dependencies, and prints the deployed web URL. Local Cairo installation and the local server are not needed for this route. No application API keys or database are needed. The deployed endpoint is publicly accessible by default.
 
 For a temporary deployment that reloads code during development:
 
@@ -74,15 +157,6 @@ Under **Adjust logo**:
 - **Space around logo:** adjusts the white padding around the artwork.
 
 Black-and-white conversion normalizes brightness before thresholding so pale brand colors remain visible, and preserves transparent areas. At opacity below 100%, the logo appears in gray tones as it blends with the white center. All controls apply to uploaded and built-in logos, and the same processed artwork is used in every export format.
-
-## Run locally
-
-```bash
-pip install -r requirements.txt
-uvicorn web_app:create_app --factory --reload
-```
-
-Open `http://127.0.0.1:8000`. For local SVG support, install Cairo (`libcairo2` on Debian/Ubuntu or `brew install cairo` on macOS). PNG, JPEG and WebP work without the Cairo system library. Modal installs Cairo automatically, so no local Cairo installation is needed to deploy.
 
 ## Tests
 
