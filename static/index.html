@@ -28,6 +28,8 @@
       </div>
       <div class="field" id="logo-upload-field">
         <span class="field-label">Center logo <span class="optional">optional</span></span>
+        <div id="builtin-logos" class="logo-grid" role="group" aria-label="Built-in logos"><p class="hint">Loading built-in logos…</p></div>
+        <p class="upload-divider">Or upload your own</p>
         <label class="dropzone" id="dropzone" for="logo">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
           <strong>Choose a logo</strong><span>or drag and drop it here</span>
@@ -37,6 +39,25 @@
         <div id="selected-file" class="selected-file" hidden><span id="file-name"></span><button type="button" id="remove-logo" aria-label="Remove logo">Remove</button></div>
         <p class="hint">A transparent logo works well. Its proportions stay intact.</p>
       </div>
+      <details class="options" id="logo-controls" open>
+        <summary>Adjust logo</summary>
+        <div class="option-body">
+          <div class="range-label"><label for="logo-percent">Logo size inside QR</label><output id="logo-value" for="logo-percent">18%</output></div>
+          <input id="logo-percent" name="logo_percent" type="range" min="8" max="28" value="18">
+          <div class="range-label"><label for="logo-opacity">Logo opacity</label><output id="opacity-value" for="logo-opacity">100%</output></div>
+          <input id="logo-opacity" type="range" min="0" max="100" value="100" aria-describedby="opacity-hint">
+          <p class="hint" id="opacity-hint">100% is opaque. Lower values fade the logo; 0% creates a plain code.</p>
+          <label class="checkbox"><input id="remove-white" type="checkbox">Make white pixels transparent</label>
+          <div id="white-options" hidden>
+            <div class="range-label"><label for="white-tolerance">White removal tolerance</label><output id="white-value" for="white-tolerance">20</output></div>
+            <input id="white-tolerance" type="range" min="0" max="100" value="20">
+          </div>
+          <p class="hint">White removal affects white details too. The QR center stays white so the code remains readable.</p>
+          <div class="range-label logo-spacing"><label for="padding">Space around logo</label><output id="padding-value" for="padding">12%</output></div>
+          <input id="padding" name="padding_percent" type="range" min="0" max="30" value="12">
+          <label class="checkbox"><input id="auto-reduce" type="checkbox" checked>Reduce the logo size if needed for scanning</label>
+        </div>
+      </details>
       <div class="field" id="bw-options" hidden>
         <div class="range-label"><label for="bw-threshold">Black-and-white contrast</label><output id="bw-value" for="bw-threshold">170</output></div>
         <input id="bw-threshold" type="range" min="1" max="254" value="170">
@@ -50,10 +71,6 @@
             <div><label for="canvas-shape">Canvas shape</label><select id="canvas-shape"><option value="square">Square / rectangle</option><option value="rounded">Rounded rectangle</option><option value="circle">Circle / oval</option><option value="hexagon">Hexagon</option><option value="triangle">Triangle</option></select></div>
           </div>
           <p class="hint">The full QR code stays inside the shape. PNG, WebP, TIFF and SVG keep transparent outer corners.</p>
-          <div class="range-label"><label for="logo-percent">Logo size</label><output id="logo-value" for="logo-percent">18%</output></div>
-          <input id="logo-percent" name="logo_percent" type="range" min="8" max="28" value="18">
-          <div class="range-label"><label for="padding">Space around logo</label><output id="padding-value" for="padding">12%</output></div>
-          <input id="padding" name="padding_percent" type="range" min="0" max="30" value="12">
           <div class="select-row">
             <div><label for="pixels">Output dimensions</label><select id="pixels"><option value="1024">1,024 × 1,024 px</option><option value="2048">2,048 × 2,048 px</option><option value="4096" selected>4,096 × 4,096 px</option><option value="6000">6,000 × 6,000 px</option><option value="custom">Custom dimensions</option></select></div>
             <div><label for="dpi">Print resolution (dpi)</label><input id="dpi" type="number" min="72" max="1200" step="1" value="600"></div>
@@ -63,7 +80,6 @@
             <div><label for="custom-height">Height (px)</label><input id="custom-height" type="number" min="512" max="8000" step="1" value="4096"></div>
           </div>
           <p class="hint" id="custom-size-hint" hidden>512–8,000 px per edge, up to 36 megapixels. The QR pattern keeps its square proportions.</p>
-          <label class="checkbox"><input id="auto-reduce" type="checkbox" checked>Reduce the logo size if needed for scanning</label>
         </div>
       </details>
       <button id="generate" class="button primary" type="submit"><span id="button-label">Create QR code</span><span class="spinner" id="spinner" hidden></span></button>

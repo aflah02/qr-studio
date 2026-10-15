@@ -2,6 +2,7 @@
 from __future__ import annotations
 import base64
 import io
+import json
 import os
 import re
 import zipfile
@@ -36,6 +37,8 @@ def _generate_payload(**options) -> dict:
         "module_style": result.module_style, "canvas_shape": result.canvas_shape,
         "formats": [{"value":key,"label":value[0]} for key,value in FORMATS.items()],
         "monochrome": result.monochrome,
+        "logo_opacity": result.logo_opacity,
+        "remove_white_background": result.remove_white_background,
         "verified": result.verified, "logo_reduced": result.logo_reduced,
         "requested_logo_percent": result.requested_logo_percent,
         "used_logo_percent": result.used_logo_percent,
@@ -56,8 +59,10 @@ def _export_payload(options: dict, kind: str):
 
 
 def create_app() -> FastAPI:
-    api = FastAPI(title="QR Studio", version="1.1.0", redoc_url=None)
+    api = FastAPI(title="QR Studio", version="1.2.0", redoc_url=None)
     static = Path(os.environ.get("QR_STATIC_DIR", Path(__file__).parent / "static"))
+    catalog = json.loads((static / "logos" / "catalog.json").read_text(encoding="utf-8"))
+    presets = {item["id"]: item for item in catalog}
 
     @api.middleware("http")
     async def response_headers(request, call_next):
@@ -81,6 +86,11 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    @api.get("/api/logos")
+    def logos():
+        return [{"id": item["id"], "label": item["label"],
+                 "src": "/static/logos/" + item["file"]} for item in catalog]
+
     async def read_options(
         url: Annotated[str, Form(max_length=3000)],
         logo: Annotated[UploadFile | None, File()] = None,
@@ -96,6 +106,10 @@ def create_app() -> FastAPI:
         height: Annotated[int | None, Form(ge=512, le=8000)] = None,
         module_style: Annotated[Literal["square","rounded","dots"], Form()] = "square",
         canvas_shape: Annotated[Literal["square","rounded","circle","hexagon","triangle"], Form()] = "square",
+        builtin_logo: Annotated[str, Form(max_length=64)] = "",
+        remove_white_background: Annotated[bool, Form()] = False,
+        white_tolerance: Annotated[int, Form(ge=0, le=100)] = 20,
+        logo_opacity: Annotated[int, Form(ge=0, le=100)] = 100,
     ):
         logo_bytes = None
         if logo is not None:
@@ -106,10 +120,18 @@ def create_app() -> FastAPI:
                         raise HTTPException(status_code=413, detail="Choose a logo smaller than 5 MB.")
             finally:
                 await logo.close()
+        if builtin_logo and logo_mode != "none":
+            if builtin_logo not in presets:
+                raise HTTPException(status_code=422, detail="Choose a logo from the built-in picker.")
+            if logo_bytes is not None:
+                raise HTTPException(status_code=422, detail="Choose a built-in logo or upload a file, one at a time.")
+            logo_bytes = (static / "logos" / presets[builtin_logo]["file"]).read_bytes()
         return dict(url=url, logo_bytes=logo_bytes, logo_percent=logo_percent,
                     padding_percent=padding_percent, pixels=pixels, dpi=dpi,
                     auto_reduce=auto_reduce, monochrome=monochrome, bw_threshold=bw_threshold,
-                    width=width, height=height, module_style=module_style, canvas_shape=canvas_shape)
+                    width=width, height=height, module_style=module_style, canvas_shape=canvas_shape,
+                    remove_white_background=remove_white_background,
+                    white_tolerance=white_tolerance, logo_opacity=logo_opacity)
 
     @api.post("/api/generate")
     async def generate(options: dict = Depends(read_options)):

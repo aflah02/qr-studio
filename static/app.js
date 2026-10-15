@@ -2,7 +2,7 @@
   "use strict";
   const $ = id => document.getElementById(id);
   const fileInput = $("logo"), buttons = [$("download-file"), $("download-zip")];
-  let logo = null, timer = null, serial = 0, controller = null, exportController = null, result = null;
+  let logo = null, builtinLogo = "", timer = null, serial = 0, controller = null, exportController = null, result = null;
   function busy(value) {
     $("generate").disabled = value; $("spinner").hidden = !value;
     $("button-label").textContent = value ? "Creating your QR code" : "Create QR code";
@@ -22,8 +22,10 @@
   function updateOptions() {
     const noLogo = $("logo-mode").value === "none";
     $("logo-upload-field").hidden = noLogo; $("bw-options").hidden = $("logo-mode").value !== "bw";
+    $("logo-controls").hidden = noLogo;
+    $("white-options").hidden = noLogo || !$("remove-white").checked;
     fileInput.disabled = noLogo;
-    for (const id of ["logo-percent", "padding", "auto-reduce"]) $(id).disabled = noLogo;
+    for (const id of ["logo-percent", "padding", "auto-reduce", "logo-opacity", "remove-white", "white-tolerance"]) $(id).disabled = noLogo;
     const custom = $("pixels").value === "custom";
     $("custom-dimensions").hidden = !custom; $("custom-size-hint").hidden = !custom;
   }
@@ -32,14 +34,40 @@
     if (!$("url").value.trim()) { message("Ready when you are"); return; }
     message("Waiting for your changes…"); timer = setTimeout(generate, 700);
   }
-  function setLogo(file) {
+  function setLogo(file, preset = null) {
     if (file && file.size > 5 * 1024 * 1024) {
-      logo = null; fileInput.value = ""; $("selected-file").hidden = true;
+      logo = null; builtinLogo = ""; fileInput.value = ""; $("selected-file").hidden = true;
+      updatePresetSelection();
       invalidate(); showError("Choose a logo smaller than 5 MB."); return;
     }
-    logo = file; $("selected-file").hidden = !file;
-    $("file-name").textContent = file ? file.name + " · " + Math.max(1,Math.round(file.size/1024)) + " KB" : "";
+    logo = file; builtinLogo = preset ? preset.id : "";
+    $("selected-file").hidden = !file && !preset;
+    $("file-name").textContent = preset ? preset.label + " · built-in logo" : file ? file.name + " · " + Math.max(1,Math.round(file.size/1024)) + " KB" : "";
+    updatePresetSelection();
     schedule();
+  }
+  function updatePresetSelection() {
+    $("builtin-logos").querySelectorAll("button").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.logo === builtinLogo));
+    });
+  }
+  async function loadPresets() {
+    try {
+      const response = await fetch("/api/logos");
+      if (!response.ok) throw new Error("Logo list unavailable");
+      const presets = await response.json();
+      $("builtin-logos").replaceChildren(...presets.map(preset => {
+        const button = document.createElement("button"), icon = document.createElement("img"), label = document.createElement("span");
+        button.type = "button"; button.className = "logo-choice"; button.dataset.logo = preset.id;
+        button.setAttribute("aria-pressed", "false"); icon.src = preset.src; icon.alt = "";
+        icon.width = 30; icon.height = 30; label.textContent = preset.label;
+        button.append(icon, label);
+        button.addEventListener("click", () => { fileInput.value = ""; setLogo(null, preset); });
+        return button;
+      }));
+    } catch (_) {
+      $("builtin-logos").textContent = "Built-in logos could not load. You can still upload your own.";
+    }
   }
   function formData() {
     const mode = $("logo-mode").value, custom = $("pixels").value === "custom";
@@ -47,7 +75,11 @@
     data.set("logo_mode", mode === "none" ? "none" : "with_logo");
     data.set("monochrome", mode === "bw" ? "true" : "false"); data.set("bw_threshold", $("bw-threshold").value);
     if (logo && mode !== "none") data.set("logo", logo, logo.name);
+    if (builtinLogo && mode !== "none") data.set("builtin_logo", builtinLogo);
     data.set("logo_percent", $("logo-percent").value); data.set("padding_percent", $("padding").value);
+    data.set("logo_opacity", $("logo-opacity").value);
+    data.set("remove_white_background", $("remove-white").checked ? "true" : "false");
+    data.set("white_tolerance", $("white-tolerance").value);
     data.set("pixels", custom ? "4096" : $("pixels").value);
     if (custom) { data.set("width", $("custom-width").value); data.set("height", $("custom-height").value); }
     data.set("dpi", $("dpi").value); data.set("auto_reduce", $("auto-reduce").checked ? "true" : "false");
@@ -120,8 +152,9 @@
   $("url").addEventListener("input",schedule);
   $("logo-mode").addEventListener("change",schedule);
   $("bw-threshold").addEventListener("input",() => { $("bw-value").textContent = $("bw-threshold").value; schedule(); });
-  for (const id of ["logo-percent","padding","pixels","dpi","auto-reduce","custom-width","custom-height","module-style","canvas-shape"]) $(id).addEventListener("input",() => {
-    $("logo-value").textContent = $("logo-percent").value + "%"; $("padding-value").textContent = $("padding").value + "%"; schedule();
+  for (const id of ["logo-percent","padding","pixels","dpi","auto-reduce","custom-width","custom-height","module-style","canvas-shape","logo-opacity","remove-white","white-tolerance"]) $(id).addEventListener("input",() => {
+    $("logo-value").textContent = $("logo-percent").value + "%"; $("padding-value").textContent = $("padding").value + "%";
+    $("opacity-value").textContent = $("logo-opacity").value + "%"; $("white-value").textContent = $("white-tolerance").value; schedule();
   });
   $("export-format").addEventListener("change",exportLabel);
   $("download-file").addEventListener("click",() => exportFile($("export-format").value));
@@ -132,6 +165,6 @@
   for (const event of ["dragleave","drop"]) $("dropzone").addEventListener(event,e => { e.preventDefault(); $("dropzone").classList.remove("dragging"); });
   $("dropzone").addEventListener("drop",event => { if (event.dataTransfer.files.length) { fileInput.value = ""; setLogo(event.dataTransfer.files[0]); } });
   window.addEventListener("beforeunload",() => { if (controller) controller.abort(); if (exportController) exportController.abort(); });
-  updateOptions(); exportLabel();
+  updateOptions(); exportLabel(); loadPresets();
 })();
 

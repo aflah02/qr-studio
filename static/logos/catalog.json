@@ -1,0 +1,32 @@
+[
+  {
+    "id": "arxiv",
+    "label": "arXiv",
+    "file": "arxiv.svg"
+  },
+  {
+    "id": "github",
+    "label": "GitHub",
+    "file": "github.svg"
+  },
+  {
+    "id": "huggingface",
+    "label": "Hugging Face",
+    "file": "huggingface.svg"
+  },
+  {
+    "id": "googlescholar",
+    "label": "Google Scholar",
+    "file": "googlescholar.svg"
+  },
+  {
+    "id": "orcid",
+    "label": "ORCID",
+    "file": "orcid.svg"
+  },
+  {
+    "id": "youtube",
+    "label": "YouTube",
+    "file": "youtube.svg"
+  }
+]

@@ -14,7 +14,7 @@ from xml.sax.saxutils import escape
 import qrcode
 import zxingcpp
 from defusedxml import ElementTree
-from PIL import Image, ImageDraw, ImageFilter, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps, UnidentifiedImageError
 from qrcode.exceptions import DataOverflowError
 
 MAX_LOGO_BYTES = 5 * 1024 * 1024
@@ -45,6 +45,8 @@ class QRResult:
     used_logo_percent: int
     has_logo: bool
     monochrome: bool
+    logo_opacity: int
+    remove_white_background: bool
     checks: tuple[ScanCheck, ...]
 
     @property
@@ -176,6 +178,38 @@ def _placement(matrix: list[list[bool]], logo: Image.Image | None, percent: int,
     width, height = logo.width * scale, logo.height * scale
     gap = max(.45, longest_edge * padding / 100)
     return ((side-width)/2, (side-height)/2, width, height, gap)
+
+
+def prepare_logo(raw: bytes | None, *, monochrome: bool = False, bw_threshold: int = 170,
+                 remove_white_background: bool = False, white_tolerance: int = 20,
+                 logo_opacity: int = 100) -> Image.Image | None:
+    """Apply white color keying, binary conversion and opacity before every export."""
+    image = load_logo(raw)
+    if image is None or logo_opacity == 0:
+        return None
+    alpha = image.getchannel("A")
+    if remove_white_background:
+        red, green, blue, _ = image.split()
+        darkest = ImageChops.darker(ImageChops.darker(red, green), blue)
+        keep = darkest.point(lambda value: 0 if value >= 255-white_tolerance else 255)
+        alpha = ImageChops.multiply(alpha, keep)
+        crop = alpha.getbbox()
+        if crop is None:
+            raise ValueError("Removing white left no visible artwork. Lower the white tolerance or turn off white removal.")
+        image.putalpha(alpha)
+        image = image.crop(crop)
+        alpha = image.getchannel("A")
+    if monochrome:
+        background = Image.new("RGBA", image.size, "white")
+        background.alpha_composite(image)
+        # Normalize brightness so pale brand colors (for example ORCID green)
+        # still produce visible artwork at the default threshold.
+        gray = ImageOps.autocontrast(ImageOps.grayscale(background))
+        image = gray.point(lambda value: 255 if value >= bw_threshold else 0).convert("RGBA")
+        # Binary alpha keeps black-and-white output pure at full opacity.
+        alpha = alpha.point(lambda value: 255 if value >= 128 else 0)
+    image.putalpha(alpha.point(lambda value: round(value * logo_opacity / 100)))
+    return image
 
 
 @lru_cache(maxsize=40)
@@ -349,6 +383,9 @@ def generate_qr(
     height: int | None = None,
     module_style: str = "square",
     canvas_shape: str = "square",
+    remove_white_background: bool = False,
+    white_tolerance: int = 20,
+    logo_opacity: int = 100,
 ) -> QRResult:
     url = normalize_url(url)
     width = width if width is not None else pixels
@@ -365,14 +402,13 @@ def generate_qr(
         raise ValueError("Choose a supported QR style and canvas shape.")
     if not 1 <= bw_threshold <= 254:
         raise ValueError("Choose a black-and-white threshold between 1 and 254.")
+    if not 0 <= white_tolerance <= 100 or not 0 <= logo_opacity <= 100:
+        raise ValueError("Choose white tolerance and logo opacity between 0 and 100.")
     if len(url.encode("utf-8")) > 1273:
         raise ValueError("This URL is too long for a QR code with high error correction. Use a shorter URL.")
-    logo = load_logo(logo_bytes)
-    if logo is not None and monochrome:
-        # Flatten transparency onto the QR's white center before thresholding.
-        background = Image.new("RGBA", logo.size, "white")
-        background.alpha_composite(logo)
-        logo = ImageOps.grayscale(background).point(lambda x: 255 if x >= bw_threshold else 0).convert("RGBA")
+    logo = prepare_logo(logo_bytes, monochrome=monochrome, bw_threshold=bw_threshold,
+                        remove_white_background=remove_white_background,
+                        white_tolerance=white_tolerance, logo_opacity=logo_opacity)
     qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_H, border=4, box_size=1)
     qr.add_data(url, optimize=0)
     try:
@@ -404,5 +440,7 @@ def generate_qr(
         pixels=max(width,height), width=width, height=height, module_style=module_style, canvas_shape=canvas_shape,
         dpi=dpi, requested_logo_percent=logo_percent,
         used_logo_percent=used if logo is not None else 0, has_logo=logo is not None,
-        monochrome=monochrome and logo is not None, checks=checks,
+        monochrome=monochrome and logo is not None,
+        logo_opacity=logo_opacity if logo is not None else 0,
+        remove_white_background=remove_white_background and logo is not None, checks=checks,
     )

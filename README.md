@@ -16,7 +16,7 @@ modal setup
 modal deploy app.py
 ```
 
-On Windows, activate with `.venv\Scripts\activate` instead. Skip `modal setup` if already authenticated. Modal builds the container, installs Cairo and the Python dependencies, and prints the deployed web URL. No application API keys or database are needed. The deployed endpoint is publicly accessible by default.
+On Windows Command Prompt, activate with `.venv\Scripts\activate.bat` instead. In PowerShell, use `.venv\Scripts\Activate.ps1`. Skip `modal setup` if already authenticated. Modal builds the container, installs Cairo and the Python dependencies, and prints the deployed web URL. No application API keys or database are needed. The deployed endpoint is publicly accessible by default.
 
 For a temporary deployment that reloads code during development:
 
@@ -28,7 +28,7 @@ modal serve app.py
 
 ## Use
 
-Paste a URL and choose a **Logo style**:
+Paste a URL, click a **built-in logo** (arXiv, GitHub, Hugging Face, Google Scholar, ORCID or YouTube), or upload your own image. Built-in assets are bundled with the app and need no remote image service. See [logo sources](THIRD_PARTY_LOGOS.md). Then choose a **Logo style**:
 
 - **No logo** generates a plain QR code, even if you previously uploaded a logo.
 - **Original color** preserves the uploaded logo's colors.
@@ -66,6 +66,15 @@ SVG downloads contain vector QR modules and an embedded PNG logo. Uploaded SVG l
 
 The app does not fetch destination URLs, use redirects or create shortened links. Uploads and generated files are processed for the request and are not saved persistently. SVG logos cannot load external resources. The browser retains its current downloads until the inputs change or the page is closed.
 
+Under **Adjust logo**:
+
+- **Logo size inside QR:** 8–28% of the QR pattern width, with aspect ratio preserved. Automatic scan protection may reduce the size and reports the size actually used.
+- **Logo opacity:** 0–100%. Lower values fade the logo against the white center; 0% removes the logo and its reserved space entirely.
+- **Make white pixels transparent:** removes white and near-white areas, including white details within the logo. Tolerance 0 removes only pure white; higher values include more near-white colors. Existing transparency is preserved. The QR's white center remains for contrast.
+- **Space around logo:** adjusts the white padding around the artwork.
+
+Black-and-white conversion normalizes brightness before thresholding so pale brand colors remain visible, and preserves transparent areas. At opacity below 100%, the logo appears in gray tones as it blends with the white center. All controls apply to uploaded and built-in logos, and the same processed artwork is used in every export format.
+
 ## Run locally
 
 ```bash
@@ -82,7 +91,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Tests cover QR destinations, upload formats, different logo proportions, explicit logo-free output, black-and-white conversion, every QR style/canvas shape combination, all eight export types, custom dimensions and DPI, PDF page dimensions, ZIP contents, static assets, API error handling and the Modal entry point.
+Tests cover QR destinations, upload formats, different logo proportions, explicit logo-free output, built-in logo assets, opacity, white removal, black-and-white conversion, every QR style/canvas shape combination, all eight export types, custom dimensions and DPI, PDF page dimensions, ZIP contents, static assets, API error handling and the Modal entry point.
 
 ## API
 
@@ -92,7 +101,11 @@ Tests cover QR destinations, upload formats, different logo proportions, explici
 | --- | --- | --- |
 | `url` | Required | HTTP or HTTPS destination |
 | `logo` | Omitted | PNG, JPEG, WebP or SVG file |
-| `logo_mode` | with_logo | `none` ignores the logo, `with_logo` uses an uploaded logo if present |
+| `builtin_logo` | Omitted | `arxiv`, `github`, `huggingface`, `googlescholar`, `orcid` or `youtube`; use instead of `logo` |
+| `logo_opacity` | 100 | 0–100%; 0 creates a plain QR code |
+| `remove_white_background` | false | Make white and near-white pixels transparent, including white details |
+| `white_tolerance` | 20 | White removal tolerance, 0–100 |
+| `logo_mode` | with_logo | `none` ignores uploaded and built-in logos; `with_logo` uses the selected logo |
 | `monochrome` | false | Convert the logo to pure black and white |
 | `bw_threshold` | 170 | Black-and-white conversion threshold, 1–254 |
 | `logo_percent` | 18 | Longest logo edge, 8–28% of QR pattern width |
@@ -108,5 +121,7 @@ Tests cover QR destinations, upload formats, different logo proportions, explici
 The JSON response includes the normalized destination, actual width/height, verification checks, a preview, the PNG and a PNG+SVG ZIP as base64, and the SVG as text. These original fields remain available for API compatibility.
 
 `POST /api/export` accepts the same fields plus `format`: `png`, `jpg`, `webp`, `svg`, `pdf`, `tiff`, `bmp`, `gif`, or `zip`. `jpeg` and `tif` are accepted aliases. The response is the file itself, with an attachment filename. ZIP exports contain all eight formats.
+
+`GET /api/logos` returns the built-in logo IDs, labels and local asset URLs. An unknown ID or simultaneous upload and preset is rejected unless `logo_mode=none`.
 
 Interactive API documentation is available at `/docs`; health status is at `/health`.
