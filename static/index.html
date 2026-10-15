@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Create a high-resolution QR code with your own center logo.">
+  <title>QR Studio</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script>
+</head>
+<body>
+<main class="app">
+  <header>
+    <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 28 28"><path d="M2 2h8v8H2zM18 2h8v8h-8zM2 18h8v8H2zM15 14h5v5h6v7H15v-5h-3v-7z"/></svg></div>
+    <div><h1>QR Studio</h1><p class="intro">Your link, ready to print or share.</p></div>
+    <span class="header-note">Made for print and sharing</span>
+  </header>
+  <div class="workspace">
+    <form id="qr-form" class="editor" novalidate>
+      <h2>Create your QR code</h2>
+      <div class="field">
+        <label for="url">Destination URL</label>
+        <input id="url" name="url" type="text" inputmode="url" autocomplete="url" placeholder="https://example.com" spellcheck="false" aria-describedby="url-hint">
+        <p class="hint" id="url-hint">The QR code points directly to this address.</p>
+      </div>
+      <div class="field">
+        <label for="logo-mode">Logo style</label>
+        <select id="logo-mode"><option value="color" selected>Original color</option><option value="none">No logo</option><option value="bw">Black and white</option></select>
+        <p class="hint">Choose a plain code or keep your logo in color or black and white.</p>
+      </div>
+      <div class="field" id="logo-upload-field">
+        <span class="field-label">Center logo <span class="optional">optional</span></span>
+        <label class="dropzone" id="dropzone" for="logo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-4 4 4-4 4 4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+          <strong>Choose a logo</strong><span>or drag and drop it here</span>
+          <span class="file-types">PNG, JPG, WebP or SVG · up to 5 MB</span>
+          <input class="sr-only" id="logo" name="logo" type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml">
+        </label>
+        <div id="selected-file" class="selected-file" hidden><span id="file-name"></span><button type="button" id="remove-logo" aria-label="Remove logo">Remove</button></div>
+        <p class="hint">A transparent logo works well. Its proportions stay intact.</p>
+      </div>
+      <div class="field" id="bw-options" hidden>
+        <div class="range-label"><label for="bw-threshold">Black-and-white contrast</label><output id="bw-value" for="bw-threshold">170</output></div>
+        <input id="bw-threshold" type="range" min="1" max="254" value="170">
+        <p class="hint">Increase the value to turn more of the logo black. Decrease it to turn more white.</p>
+      </div>
+      <details class="options">
+        <summary>Customize output</summary>
+        <div class="option-body">
+          <div class="range-label"><label for="logo-percent">Logo size</label><output id="logo-value" for="logo-percent">18%</output></div>
+          <input id="logo-percent" name="logo_percent" type="range" min="8" max="28" value="18">
+          <div class="range-label"><label for="padding">Space around logo</label><output id="padding-value" for="padding">12%</output></div>
+          <input id="padding" name="padding_percent" type="range" min="0" max="30" value="12">
+          <div class="select-row">
+            <div><label for="pixels">PNG size</label><select id="pixels"><option value="1024">1,024 × 1,024 px</option><option value="2048">2,048 × 2,048 px</option><option value="4096" selected>4,096 × 4,096 px</option><option value="6000">6,000 × 6,000 px</option></select></div>
+            <div><label for="dpi">Print resolution</label><select id="dpi"><option value="300">300 dpi</option><option value="600" selected>600 dpi</option></select></div>
+          </div>
+          <label class="checkbox"><input id="auto-reduce" type="checkbox" checked>Reduce the logo size if needed for scanning</label>
+        </div>
+      </details>
+      <button id="generate" class="button primary" type="submit"><span id="button-label">Create QR code</span><span class="spinner" id="spinner" hidden></span></button>
+      <p class="editor-footnote">The preview updates when you change a setting.</p>
+      <p id="error" class="error" role="alert" hidden></p>
+    </form>
+    <section class="preview-pane" aria-label="QR code preview">
+      <div class="preview-heading"><h2>Preview</h2><span id="status" role="status" aria-live="polite">Ready when you are</span></div>
+      <div class="canvas" id="canvas">
+        <div class="empty-state" id="empty-state">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M5 5h18v18H5zM41 5h18v18H41zM5 41h18v18H5zM35 34h11v11h13v14H35V48h-7V34z"/></svg>
+          <h3>Your QR code will appear here</h3><p>Add a URL to get started.<br>Drop in a logo to make it yours.</p>
+        </div>
+        <img id="qr-preview" alt="Your QR code preview" hidden>
+      </div>
+      <div class="preview-meta" id="preview-meta" hidden><span id="dimensions"></span><a id="destination" target="_blank" rel="noopener noreferrer"></a></div>
+      <p class="adjustment" id="adjustment" hidden></p>
+      <div class="downloads">
+        <a id="download-png" class="button primary disabled" aria-disabled="true" tabindex="-1">Download PNG</a>
+        <a id="download-svg" class="button secondary disabled" aria-disabled="true" tabindex="-1">Download SVG</a>
+      </div>
+      <a id="download-zip" class="zip-link disabled" aria-disabled="true" tabindex="-1">Download both as ZIP</a>
+      <details id="scan-details" class="scan-details" hidden><summary>Scan check details</summary><ul id="scan-checks"></ul><p class="hint">Test the final printed size with a phone. Keep the white margin intact.</p></details>
+    </section>
+  </div>
+  <footer>High-resolution PNG and scalable SVG downloads. High error correction for reliable scanning.</footer>
+</main>
+</body>
+</html>
